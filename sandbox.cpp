@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <algorithm>
+#include <string>
 
 #include <string.h>
 
@@ -114,12 +115,9 @@ struct Application {
     gtk_scale_set_draw_value (GTK_SCALE (slider), 0);
     slider_update_signal_id = g_signal_connect (G_OBJECT (slider), "value-changed", G_CALLBACK (+[] (GtkRange* range, Application* application) -> void {
       gdouble value = gtk_range_get_value (GTK_RANGE (application->slider));
-      gst_element_seek_simple (application->playbin, GST_FORMAT_TIME, (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT), (gint64) (value * GST_SECOND));
+      gst_element_seek_simple (application->playbin, GST_FORMAT_TIME, (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT), static_cast<gint64> (value * GST_SECOND));
     }),
         this);
-
-    streams_list = gtk_text_view_new ();
-    gtk_text_view_set_editable (GTK_TEXT_VIEW (streams_list), FALSE);
 
     GtkWidget* controls = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_box_pack_start (GTK_BOX (controls), play_button, FALSE, FALSE, 2);
@@ -127,16 +125,11 @@ struct Application {
     gtk_box_pack_start (GTK_BOX (controls), stop_button, FALSE, FALSE, 2);
     gtk_box_pack_start (GTK_BOX (controls), slider, TRUE, TRUE, 2);
 
-    GtkWidget* main_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_box_pack_start (GTK_BOX (main_hbox), video_window, TRUE, TRUE, 0);
-    gtk_box_pack_start (GTK_BOX (main_hbox), streams_list, FALSE, FALSE, 2);
-
     GtkWidget* main_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_pack_start (GTK_BOX (main_box), main_hbox, TRUE, TRUE, 0);
+    gtk_box_pack_start (GTK_BOX (main_box), video_window, TRUE, TRUE, 0);
     gtk_box_pack_start (GTK_BOX (main_box), controls, FALSE, FALSE, 0);
     gtk_container_add (GTK_CONTAINER (main_window), main_box);
-    gtk_window_set_default_size (GTK_WINDOW (main_window), 640, 480);
-
+    gtk_window_set_default_size (GTK_WINDOW (main_window), 720, 480);
     gtk_widget_show_all (main_window);
   }
   gboolean refresh_ui ()
@@ -157,6 +150,17 @@ struct Application {
       g_signal_handler_unblock (slider, slider_update_signal_id);
     }
     return TRUE;
+  }
+
+  static std::string to_string (gchar*& input, char const* alternate_input = nullptr)
+  {
+    std::string output;
+    if (input) {
+      output = input;
+      g_free (std::exchange (input, nullptr));
+    } else
+      output = alternate_input;
+    return output;
   }
 
   void handle_bus_error_message (GstBus* bus, GstMessage* message)
@@ -199,80 +203,49 @@ struct Application {
     if (g_strcmp0 (gst_structure_get_name (gst_message_get_structure (message)), "tags-changed") != 0)
       return;
 
-    GtkTextBuffer* text = gtk_text_view_get_buffer (GTK_TEXT_VIEW (streams_list));
-    gtk_text_buffer_set_text (text, "", -1);
     gint n_video, n_audio, n_text;
     g_object_get (playbin, "n-video", &n_video, "n-audio", &n_audio, "n-text", &n_text, NULL);
 
-    for (gint i = 0; i < n_video; i++) {
+    for (gint index = 0; index < n_video; index++) {
       GstTagList* tags = nullptr;
-      g_signal_emit_by_name (playbin, "get-video-tags", i, &tags);
+      g_signal_emit_by_name (playbin, "get-video-tags", index, &tags);
       if (!tags)
         continue;
-      gchar* total_str = g_strdup_printf ("video stream %d:\n", i);
-      gtk_text_buffer_insert_at_cursor (text, total_str, -1);
-      g_free (total_str);
-      gchar* str;
-      gst_tag_list_get_string (tags, GST_TAG_VIDEO_CODEC, &str);
-      total_str = g_strdup_printf ("  codec: %s\n", str ? str : "unknown");
-      gtk_text_buffer_insert_at_cursor (text, total_str, -1);
-      g_free (total_str);
-      g_free (str);
+      gchar* codec;
+      gst_tag_list_get_string (tags, GST_TAG_VIDEO_CODEC, &codec);
+      g_print ("video %d: %s\n", index, to_string (codec, "unknown").c_str ());
       gst_tag_list_free (tags);
     }
 
-    for (gint i = 0; i < n_audio; i++) {
+    for (gint index = 0; index < n_audio; index++) {
       GstTagList* tags = nullptr;
-      g_signal_emit_by_name (playbin, "get-audio-tags", i, &tags);
+      g_signal_emit_by_name (playbin, "get-audio-tags", index, &tags);
       if (!tags)
         continue;
-      gchar* total_str = g_strdup_printf ("\naudio stream %d:\n", i);
-      gtk_text_buffer_insert_at_cursor (text, total_str, -1);
-      g_free (total_str);
-      gchar* str;
-      if (gst_tag_list_get_string (tags, GST_TAG_AUDIO_CODEC, &str)) {
-        total_str = g_strdup_printf ("  codec: %s\n", str);
-        gtk_text_buffer_insert_at_cursor (text, total_str, -1);
-        g_free (total_str);
-        g_free (str);
-      }
-      if (gst_tag_list_get_string (tags, GST_TAG_LANGUAGE_CODE, &str)) {
-        total_str = g_strdup_printf ("  language: %s\n", str);
-        gtk_text_buffer_insert_at_cursor (text, total_str, -1);
-        g_free (total_str);
-        g_free (str);
-      }
-      guint rate;
-      if (gst_tag_list_get_uint (tags, GST_TAG_BITRATE, &rate)) {
-        total_str = g_strdup_printf ("  bitrate: %d\n", rate);
-        gtk_text_buffer_insert_at_cursor (text, total_str, -1);
-        g_free (total_str);
-      }
+      gchar* codec = nullptr;
+      gst_tag_list_get_string (tags, GST_TAG_AUDIO_CODEC, &codec);
+      gchar* language_code = nullptr;
+      gst_tag_list_get_string (tags, GST_TAG_LANGUAGE_CODE, &language_code);
+      guint rate = 0;
+      gst_tag_list_get_uint (tags, GST_TAG_BITRATE, &rate);
+      g_print ("audio %d: %s, language %s, rate %u\n", index, to_string (codec, "unknown").c_str (), to_string (language_code, "unknown").c_str (), rate);
       gst_tag_list_free (tags);
     }
 
-    for (gint i = 0; i < n_text; i++) {
+    for (gint index = 0; index < n_text; index++) {
       GstTagList* tags = nullptr;
-      g_signal_emit_by_name (playbin, "get-text-tags", i, &tags);
+      g_signal_emit_by_name (playbin, "get-text-tags", index, &tags);
       if (!tags)
         continue;
-      gchar* total_str = g_strdup_printf ("\nsubtitle stream %d:\n", i);
-      gtk_text_buffer_insert_at_cursor (text, total_str, -1);
-      g_free (total_str);
-      gchar* str;
-      if (gst_tag_list_get_string (tags, GST_TAG_LANGUAGE_CODE, &str)) {
-        total_str = g_strdup_printf ("  language: %s\n", str);
-        gtk_text_buffer_insert_at_cursor (text, total_str, -1);
-        g_free (total_str);
-        g_free (str);
-      }
+      gchar* language_code = nullptr;
+      gst_tag_list_get_string (tags, GST_TAG_LANGUAGE_CODE, &language_code);
+      g_print ("text %d: language %s\n", index, to_string (language_code, "unknown").c_str ());
       gst_tag_list_free (tags);
     }
   }
 
-  GstElement* playbin;
-  GtkWidget* slider;
-  GtkWidget* streams_list;
+  GstElement* playbin = nullptr;
+  GtkWidget* slider = nullptr;
   gulong slider_update_signal_id;
   GstState state;
   gint64 duration = GST_CLOCK_TIME_NONE;
