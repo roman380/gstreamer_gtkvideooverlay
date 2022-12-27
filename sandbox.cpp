@@ -120,7 +120,7 @@ struct Application {
 
     streams_list = gtk_text_view_new ();
     gtk_text_view_set_editable (GTK_TEXT_VIEW (streams_list), FALSE);
-F
+
     GtkWidget* controls = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_box_pack_start (GTK_BOX (controls), play_button, FALSE, FALSE, 2);
     gtk_box_pack_start (GTK_BOX (controls), pause_button, FALSE, FALSE, 2);
